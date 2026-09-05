@@ -1,0 +1,780 @@
+// Larizinha Store - Database Schema
+// Banco de dados: PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==============================
+// ENUMS
+// ==============================
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+  DELETED
+}
+
+enum AdminRole {
+  OWNER
+  ADMIN
+  STOCK
+  FINANCE
+  SUPPORT
+  ANALYST
+}
+
+enum ProductStatus {
+  ACTIVE
+  PAUSED
+  DELETED
+}
+
+enum StockItemStatus {
+  AVAILABLE
+  RESERVED
+  SOLD
+}
+
+enum OrderStatus {
+  CREATED
+  RESERVED
+  PAID
+  DELIVERING
+  DELIVERED
+  EXPIRED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum WithdrawalStatus {
+  REQUESTED
+  VALIDATING
+  PROCESSING
+  PAID
+  REJECTED
+  CANCELLED
+}
+
+enum CommissionStatus {
+  AVAILABLE
+  RESERVED
+  PAID
+}
+
+enum GiftCardStatus {
+  ACTIVE
+  REDEEMING
+  USED
+  EXPIRED
+  DISABLED
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  HUMAN_REQUIRED
+  RESOLVED
+  CLOSED
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum ScheduledStatus {
+  PENDING
+  SENT
+  CANCELLED
+  FAILED
+}
+
+enum DeliveryMethod {
+  TELEGRAM
+  WHATSAPP
+  EMAIL
+}
+
+enum TransactionType {
+  RECHARGE
+  PURCHASE
+  BONUS
+  GIFT_CARD_CREDIT
+  WITHDRAWAL
+  COMMISSION
+  ADJUSTMENT
+}
+
+enum InputStateType {
+  WAITING_FOR_EMAIL
+  WAITING_FOR_WHATSAPP
+  WAITING_FOR_NAME
+  WAITING_FOR_CPF
+  WAITING_FOR_CNPJ
+  WAITING_FOR_PIX_KEY
+  WAITING_FOR_QUANTITY
+  WAITING_FOR_VALUE
+  WAITING_FOR_GIFT_CARD
+  WAITING_FOR_PASSWORD
+  WAITING_FOR_CONFIRMATION
+  WAITING_FOR_SEARCH
+  WAITING_FOR_BANK_DATA
+  WAITING_FOR_WHATSAPP_CODE
+  WAITING_FOR_PRODUCT_NAME
+  WAITING_FOR_PRODUCT_PRICE
+  WAITING_FOR_PRODUCT_CATEGORY
+  WAITING_FOR_PRODUCT_DESCRIPTION
+}
+
+enum NotificationType {
+  PURCHASE_COMPLETED
+  PAYMENT_APPROVED
+  PAYMENT_EXPIRED
+  PRODUCT_EXPIRED
+  STOCK_ALERT
+  GENERAL_ANNOUNCEMENT
+  PROMOTION
+  WITHDRAWAL_UPDATE
+  TICKET_CREATED
+  TICKET_UPDATED
+  HUMAN_SUPPORT
+}
+
+enum RateLimitType {
+  COMMAND
+  CLICK
+  PIX_GENERATION
+  GIFT_CARD
+  SEARCH
+  ACTIVATION
+  WITHDRAWAL
+  AI_MESSAGE
+}
+
+enum RateLimitAction {
+  ALLOW
+  COOLDOWN
+  BLOCK_TEMP
+  BLOCK_PERMANENT
+}
+
+// ==============================
+// USERS & AUTH
+// ==============================
+
+model User {
+  id                Int                 @id @default(autoincrement())
+  telegramId        BigInt              @unique
+  username          String?
+  firstName         String?
+  lastName          String?
+  languageCode      String?
+  isPremium         Boolean             @default(false)
+  isSubscribed      Boolean             @default(false)
+  status            UserStatus          @default(ACTIVE)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  wallets           Wallet[]
+  orders            Order[]
+  payments          Payment[]
+  giftCardRedemptions GiftCardRedemption[]
+  referralLinks     AffiliateReferral[] @relation("Referrer")
+  referredBy        AffiliateReferral[] @relation("Referred")
+  commissions       AffiliateCommission[]
+  withdrawals       Withdrawal[]
+  supportTickets    SupportTicket[]
+  inputStates       InputState[]
+  notifications     Notification[]
+  rateLimits        RateLimit[]
+  whatsappContacts  WhatsappContact[]
+  emailDeliveries   EmailDelivery[]
+  activationTokens  ActivationToken[]
+  verificationCodes VerificationCode[]
+  alerts            Alert[]
+  auditLogs         AuditLog[]         @relation("AdminActor")
+  adminRoles        AdminUser[]
+  sessions          Session[]
+}
+
+model AdminUser {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id])
+  role      AdminRole
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([userId, role])
+}
+
+// ==============================
+// WALLET & TRANSACTIONS
+// ==============================
+
+model Wallet {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  balance   Decimal  @default(0) @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions WalletTransaction[]
+
+  @@unique([userId])
+}
+
+model WalletTransaction {
+  id               Int             @id @default(autoincrement())
+  walletId         Int
+  wallet           Wallet          @relation(fields: [walletId], references: [id])
+  type             TransactionType
+  amount           Decimal         @db.Decimal(10, 2)
+  balanceAfter     Decimal         @db.Decimal(10, 2)
+  description      String?
+  referenceId      String?         // pode ser payment_id, order_id, etc.
+  paymentId        Int?            // relação com pagamento
+  payment          Payment?        @relation(fields: [paymentId], references: [id])
+  createdAt        DateTime        @default(now())
+
+  @@index([walletId])
+  @@index([paymentId])
+}
+
+// ==============================
+// PRODUCTS & CATEGORIES
+// ==============================
+
+model Category {
+  id          Int       @id @default(autoincrement())
+  name        String
+  emoji       String?
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  products    Product[]
+}
+
+model Product {
+  id              Int             @id @default(autoincrement())
+  name            String
+  emoji           String?
+  price           Decimal         @db.Decimal(10, 2)
+  categoryId      Int?
+  category        Category?       @relation(fields: [categoryId], references: [id])
+  description     String?
+  imageUrl        String?
+  guarantee       String?
+  validityDays    Int?            // duração em dias
+  deliveryType    DeliveryMethod  @default(TELEGRAM)
+  status          ProductStatus   @default(ACTIVE)
+  minStock        Int             @default(0)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  stockItems      StockItem[]
+  orderItems      OrderItem[]
+  alerts          Alert[]
+}
+
+model StockItem {
+  id           Int             @id @default(autoincrement())
+  productId    Int
+  product      Product         @relation(fields: [productId], references: [id])
+  status       StockItemStatus @default(AVAILABLE)
+  login        String?
+  senha        String?
+  validade     DateTime?
+  extraData    Json?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  orderItems    OrderItem[]    // relação inversa para OrderItem
+
+  @@index([productId, status])
+}
+
+// ==============================
+// ORDERS & RESERVATIONS
+// ==============================
+
+model Reservation {
+  id          Int             @id @default(autoincrement())
+  stockItemId Int
+  stockItem   StockItem       @relation(fields: [stockItemId], references: [id])
+  userId      Int?
+  user        User?           @relation(fields: [userId], references: [id])
+  orderId     Int?
+  order       Order?          @relation(fields: [orderId], references: [id])
+  status      StockItemStatus @default(RESERVED)
+  expiresAt   DateTime
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([expiresAt])
+}
+
+model Order {
+  id               Int             @id @default(autoincrement())
+  userId           Int
+  user             User            @relation(fields: [userId], references: [id])
+  status           OrderStatus     @default(CREATED)
+  totalAmount      Decimal         @db.Decimal(10, 2)
+  paymentMethod    String          @default("wallet")
+  paymentId        Int?
+  payment          Payment?        @relation(fields: [paymentId], references: [id])
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  deliveredAt      DateTime?
+  expirationDate   DateTime?
+
+  items            OrderItem[]
+  reservations     Reservation[]
+  emailDeliveries  EmailDelivery[]
+  whatsappContacts WhatsappContact[]
+  activationTokens ActivationToken[]
+  notifications    Notification[]
+
+  @@index([userId])
+}
+
+model OrderItem {
+  id          Int      @id @default(autoincrement())
+  orderId     Int
+  order       Order    @relation(fields: [orderId], references: [id])
+  productId   Int
+  product     Product  @relation(fields: [productId], references: [id])
+  quantity    Int      @default(1)
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  stockItemId Int?
+  stockItem   StockItem? @relation(fields: [stockItemId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+// ==============================
+// PAYMENTS (PIX)
+// ==============================
+
+model Payment {
+  id                Int             @id @default(autoincrement())
+  userId            Int
+  user              User            @relation(fields: [userId], references: [id])
+  providerPaymentId String?         @unique
+  amount            Decimal         @db.Decimal(10, 2)
+  bonus             Decimal         @default(0) @db.Decimal(10, 2)
+  status            PaymentStatus   @default(CREATED)
+  qrCode            String?
+  copiaCola         String?
+  expiresAt         DateTime?
+  paidAt            DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  paymentEvents     PaymentEvent[]
+  orders            Order[]
+  walletTransactions WalletTransaction[]
+
+  @@index([userId, status])
+}
+
+model PaymentEvent {
+  id          Int           @id @default(autoincrement())
+  paymentId   Int
+  payment     Payment       @relation(fields: [paymentId], references: [id])
+  type        String
+  payload     Json?
+  status      PaymentStatus
+  createdAt   DateTime      @default(now())
+
+  @@index([paymentId])
+}
+
+// ==============================
+// GIFT CARDS
+// ==============================
+
+model GiftCard {
+  id          Int             @id @default(autoincrement())
+  code        String          @unique
+  value       Decimal         @db.Decimal(10, 2)
+  status      GiftCardStatus  @default(ACTIVE)
+  expiresAt   DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  redeemedAt  DateTime?
+  redemption  GiftCardRedemption?
+}
+
+model GiftCardRedemption {
+  id          Int       @id @default(autoincrement())
+  giftCardId  Int
+  giftCard    GiftCard  @relation(fields: [giftCardId], references: [id])
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id])
+  redeemedAt  DateTime  @default(now())
+}
+
+// ==============================
+// AFFILIATES
+// ==============================
+
+model AffiliateReferral {
+  id          Int      @id @default(autoincrement())
+  referrerId  Int
+  referrer    User     @relation("Referrer", fields: [referrerId], references: [id])
+  referredId  Int
+  referred    User     @relation("Referred", fields: [referredId], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@unique([referredId])
+  @@index([referrerId])
+}
+
+model AffiliateCommission {
+  id            Int             @id @default(autoincrement())
+  userId        Int
+  user          User            @relation(fields: [userId], references: [id])
+  referralId    Int?
+  referral      AffiliateReferral? @relation(fields: [referralId], references: [id])
+  amount        Decimal         @db.Decimal(10, 2)
+  status        CommissionStatus @default(AVAILABLE)
+  sourceOrderId Int?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ==============================
+// WITHDRAWALS
+// ==============================
+
+model Withdrawal {
+  id           Int              @id @default(autoincrement())
+  userId       Int
+  user         User             @relation(fields: [userId], references: [id])
+  amount       Decimal          @db.Decimal(10, 2)
+  fee          Decimal          @default(0) @db.Decimal(10, 2)
+  netAmount    Decimal          @db.Decimal(10, 2)
+  method       String           // PIX, BANK_TRANSFER
+  pixKey       String?
+  bankData     Json?
+  status       WithdrawalStatus @default(REQUESTED)
+  providerId   String?
+  reason       String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  processedAt  DateTime?
+
+  attempts     WithdrawalAttempt[]
+
+  @@index([userId, status])
+}
+
+model WithdrawalAttempt {
+  id            Int               @id @default(autoincrement())
+  withdrawalId  Int
+  withdrawal    Withdrawal        @relation(fields: [withdrawalId], references: [id])
+  attemptNumber Int
+  status        WithdrawalStatus
+  payload       Json?
+  response      Json?
+  createdAt     DateTime          @default(now())
+}
+
+// ==============================
+// SUPPORT TICKETS
+// ==============================
+
+model SupportTicket {
+  id          Int          @id @default(autoincrement())
+  userId      Int
+  user        User         @relation(fields: [userId], references: [id])
+  subject     String?
+  message     String
+  status      TicketStatus @default(OPEN)
+  assignedTo  Int?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  resolvedAt  DateTime?
+}
+
+// ==============================
+// MESSAGES & CUSTOMIZATION (com screen, position, componentOrder)
+// ==============================
+
+model Message {
+  id              Int      @id @default(autoincrement())
+  key             String   @unique
+  screen          String?  // tela a que pertence (start, catalog, product, etc.)
+  title           String?
+  text            String
+  imageUrl        String?
+  videoUrl        String?
+  buttons         Json?
+  componentOrder  Json?    // ordem dos componentes (imagem, texto, botões...)
+  position        Int      @default(0)
+  order           Int      @default(0) // ordem dentro da mesma tela
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Button {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  screen    String?  // tela associada
+  text      String
+  emoji     String?
+  action    String
+  position  Int      @default(0) // posição dentro do teclado
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+  permission String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ==============================
+// SETTINGS & CONFIG
+// ==============================
+
+model Setting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// ==============================
+// MEDIA & ASSETS
+// ==============================
+
+model Media {
+  id        Int      @id @default(autoincrement())
+  type      String
+  fileId    String?
+  url       String?
+  createdAt DateTime @default(now())
+}
+
+// ==============================
+// SESSIONS & INPUT STATES
+// ==============================
+
+model Session {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id])
+  chatId      BigInt
+  state       String?
+  data        Json?
+  history     Json?    // histórico de navegação para o botão Voltar
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, chatId])
+}
+
+model NavigationHistory {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id])
+  sessionId   Int?
+  session     Session? @relation(fields: [sessionId], references: [id])
+  screen      String   // identificador da tela
+  data        Json?    // dados associados à navegação
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model InputState {
+  id              Int            @id @default(autoincrement())
+  userId          Int
+  user            User           @relation(fields: [userId], references: [id])
+  type            InputStateType
+  data            Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+// ==============================
+// ALERTS
+// ==============================
+
+model Alert {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  productId Int?
+  product   Product? @relation(fields: [productId], references: [id])
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+// ==============================
+// AUDIT LOGS
+// ==============================
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  adminId    Int?
+  admin      User?    @relation("AdminActor", fields: [adminId], references: [id])
+  action     String
+  entityType String?
+  entityId   String?
+  details    Json?
+  createdAt  DateTime @default(now())
+}
+
+// ==============================
+// NOTIFICATIONS
+// ==============================
+
+model Notification {
+  id            Int                @id @default(autoincrement())
+  userId        Int?
+  user          User?              @relation(fields: [userId], references: [id])
+  type          NotificationType
+  message       Json?
+  status        NotificationStatus @default(PENDING)
+  channel       String
+  attempts      Int                @default(0)
+  lastError     String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  scheduledFor  DateTime?
+  sentAt        DateTime?
+}
+
+// ==============================
+// SCHEDULED BROADCASTS / NOTIFICATIONS
+// ==============================
+
+model ScheduledBroadcast {
+  id                Int              @id @default(autoincrement())
+  scheduledAt       DateTime         // com precisão de segundos
+  recurrence        String?          // ex: "daily", "weekly", "monthly", ou null
+  status            ScheduledStatus  @default(PENDING)
+  audienceFilter    Json?            // critérios de público (todos, ativos, compradores, etc.)
+  excludeBlocked    Boolean          @default(true)
+  message           Json             // conteúdo da mensagem (texto, imagem, botões, etc.)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  sentAt            DateTime?
+  error             String?
+}
+
+// ==============================
+// MAINTENANCE STATE
+// ==============================
+
+model MaintenanceState {
+  id            Int      @id @default(autoincrement())
+  isActive      Boolean  @default(false)
+  message       String
+  onlineMessage String
+  updatedAt     DateTime @updatedAt
+}
+
+// ==============================
+// RATE LIMITS
+// ==============================
+
+model RateLimit {
+  id         Int             @id @default(autoincrement())
+  userId     Int?
+  user       User?           @relation(fields: [userId], references: [id])
+  phone      String?
+  type       RateLimitType
+  action     RateLimitAction
+  count      Int             @default(0)
+  expiresAt  DateTime?
+  createdAt  DateTime        @default(now())
+}
+
+// ==============================
+// WHATSAPP CONTACTS & DELIVERIES
+// ==============================
+
+model WhatsappContact {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id])
+  phone       String   @unique
+  isVerified  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model EmailDelivery {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id])
+  orderId    Int?
+  order      Order?   @relation(fields: [orderId], references: [id])
+  toEmail    String
+  subject    String
+  body       String
+  status     NotificationStatus @default(PENDING)
+  attempts   Int      @default(0)
+  lastError  String?
+  sentAt     DateTime?
+  createdAt  DateTime @default(now())
+}
+
+// ==============================
+// ACTIVATION TOKENS & VERIFICATION CODES
+// ==============================
+
+model ActivationToken {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id])
+  orderId    Int?
+  order      Order?   @relation(fields: [orderId], references: [id])
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+}
+
+model VerificationCode {
+  id         Int      @id @default(autoincrement())
+  userId     Int?
+  user       User?    @relation(fields: [userId], references: [id])
+  phone      String?
+  email      String?
+  codeHash   String
+  purpose    String
+  expiresAt  DateTime
+  attempts   Int      @default(0)
+  verifiedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([phone])
+  @@index([email])
+}
