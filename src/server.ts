@@ -2,12 +2,13 @@
 import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
-import { PrismaClient } from '@prisma/client';
 import Redis from 'ioredis';
 import Bull from 'bull';
 import { Telegraf } from 'telegraf';
-import pino from 'pino';
 import cron from 'node-cron';
+
+// Importa o Prisma a partir do arquivo dedicado (evita dependência circular)
+import { prisma } from './database/prisma';
 
 // Importações de módulos internos (a implementar)
 import { setupTelegramBot } from './bots/telegram/setup';
@@ -17,9 +18,6 @@ import { startReconciliationWorkers } from './workers/reconciliation';
 import { initializeMaintenanceCheck } from './services/maintenance';
 import { startScheduledBroadcasts } from './services/scheduledBroadcasts';
 import { logger } from './utils/logger';
-
-// Inicialização do Prisma
-export const prisma = new PrismaClient();
 
 // Inicialização do Redis (usado também pelas filas Bull)
 export const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
@@ -110,19 +108,16 @@ async function main() {
   // Tarefas periódicas de reconciliação (com deduplicação via jobId fixo)
   cron.schedule('* * * * *', async () => {
     try {
-      // Job para reconciliar pagamentos
       await reconciliationQueue.add(
         { type: 'reconcile_payments' },
         { jobId: 'cron-reconcile-payments', removeOnComplete: true }
       );
 
-      // Job para liberar reservas expiradas
       await reconciliationQueue.add(
         { type: 'release_expired_reservations' },
         { jobId: 'cron-release-reservations', removeOnComplete: true }
       );
 
-      // Job para processar notificações pendentes
       await reconciliationQueue.add(
         { type: 'process_pending_notifications' },
         { jobId: 'cron-process-notifications', removeOnComplete: true }
